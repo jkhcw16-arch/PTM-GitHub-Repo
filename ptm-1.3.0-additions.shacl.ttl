@@ -1,0 +1,233 @@
+@prefix pm:   <https://pairwise-memory.dev/ontology/1.0/> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# PTM 1.3.0 candidate validation additions.
+
+pm:PairwiseMemoryShape a sh:NodeShape ;
+    sh:targetClass pm:PairwiseMemory ;
+    sh:property [ sh:path pm:hasSourceState ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:State ] ;
+    sh:property [ sh:path pm:hasTargetState ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:State ] ;
+    sh:property [ sh:path pm:hasSourceTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:TimePoint ] ;
+    sh:property [ sh:path pm:hasTargetTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:TimePoint ] ;
+    sh:property [ sh:path pm:schemaVersion ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:sparql [
+      sh:message "PTM-17/18: Each delta component must equal target exponent minus source exponent on the same prime axis."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:hasSourceState ?s ; pm:hasTargetState ?t ; pm:hasDeltaComponent ?d .
+          ?d pm:onPrimeAxis ?axis ; pm:deltaValue ?dv .
+          FILTER NOT EXISTS {
+            ?s pm:hasAxisCoordinate ?sc . ?sc pm:onPrimeAxis ?axis ; pm:exponentValue ?sv .
+            ?t pm:hasAxisCoordinate ?tc . ?tc pm:onPrimeAxis ?axis ; pm:exponentValue ?tv .
+            FILTER (?dv = (?tv - ?sv))
+          }
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-19: nextMemory must share the exact target/source state boundary."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:nextMemory ?next ; pm:hasTargetState ?target .
+          ?next pm:hasSourceState ?nextSource .
+          FILTER (?target != ?nextSource)
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-19: nextMemory must share the exact target/source time boundary."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:nextMemory ?next ; pm:hasTargetTime ?t1 .
+          ?next pm:hasSourceTime ?t2 .
+          FILTER (?t1 != ?t2)
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-26: Source and target states must have the same schemaVersion as the ordinary pairwise memory."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:schemaVersion ?mv ; pm:hasSourceState ?s ; pm:hasTargetState ?t .
+          ?s pm:schemaVersion ?sv . ?t pm:schemaVersion ?tv .
+          FILTER (?mv != ?sv || ?mv != ?tv)
+        }
+      """
+    ] .
+
+
+pm:StateSchemaShape a sh:NodeShape ;
+    sh:targetClass pm:State ;
+    sh:property [ sh:path pm:schemaVersion ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] .
+
+pm:AxisCoordinateShape a sh:NodeShape ;
+    sh:targetClass pm:AxisCoordinate ;
+    sh:property [ sh:path pm:onPrimeAxis ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path pm:exponentValue ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ] .
+
+pm:SignedDeltaComponentShape a sh:NodeShape ;
+    sh:targetClass pm:SignedDeltaComponent ;
+    sh:property [ sh:path pm:onPrimeAxis ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path pm:deltaValue ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ] .
+
+pm:StateCoordinateUniquenessShape a sh:NodeShape ;
+    sh:targetClass pm:State ;
+    sh:sparql [
+      sh:message "A state must not contain more than one axis coordinate for the same prime axis."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:hasAxisCoordinate ?a, ?b .
+          ?a pm:onPrimeAxis ?axis . ?b pm:onPrimeAxis ?axis .
+          FILTER (?a != ?b)
+        }
+      """
+    ] .
+
+pm:DeltaAxisUniquenessShape a sh:NodeShape ;
+    sh:targetClass pm:PairwiseMemory ;
+    sh:sparql [
+      sh:message "A pairwise memory must not contain more than one delta component for the same prime axis."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:hasDeltaComponent ?a, ?b .
+          ?a pm:onPrimeAxis ?axis . ?b pm:onPrimeAxis ?axis .
+          FILTER (?a != ?b)
+        }
+      """
+    ] .
+
+pm:HistoricalRoleShape a sh:NodeShape ;
+    sh:targetClass pm:HistoricalRole ;
+    sh:property [ sh:path pm:roleNaturalNumber ; sh:minCount 1 ; sh:maxCount 1 ; sh:hasValue 1 ] .
+
+pm:ProjectiveRoleShape a sh:NodeShape ;
+    sh:targetClass pm:ProjectiveRole ;
+    sh:property [ sh:path pm:roleNaturalNumber ; sh:minCount 1 ; sh:maxCount 1 ; sh:hasValue 2 ] .
+
+# Algebraic composition constraints
+pm:AlgebraicCompositionShape a sh:NodeShape ;
+    sh:targetSubjectsOf pm:composesFirst ;
+    sh:property [ sh:path pm:composesFirst ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:PairwiseMemory ] ;
+    sh:property [ sh:path pm:composesSecond ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:PairwiseMemory ] ;
+    sh:property [ sh:path pm:compositeMemory ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:PairwiseMemory ] ;
+    sh:sparql [
+      sh:message "PTM-20: Composition requires codomain(first) = domain(second)."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:composesFirst ?m1 ; pm:composesSecond ?m2 .
+          ?m1 pm:hasTargetState ?mid1 . ?m2 pm:hasSourceState ?mid2 .
+          FILTER (?mid1 != ?mid2)
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-20: Composite source/target endpoints must equal first source and second target."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:composesFirst ?m1 ; pm:composesSecond ?m2 ; pm:compositeMemory ?mc .
+          ?m1 pm:hasSourceState ?s . ?m2 pm:hasTargetState ?t .
+          ?mc pm:hasSourceState ?cs ; pm:hasTargetState ?ct .
+          FILTER (?s != ?cs || ?t != ?ct)
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-20: Composite delta must equal componentwise sum of the two deltas."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:composesFirst ?m1 ; pm:composesSecond ?m2 ; pm:compositeMemory ?mc .
+          ?m1 pm:hasDeltaComponent ?d1 . ?d1 pm:onPrimeAxis ?axis ; pm:deltaValue ?v1 .
+          ?m2 pm:hasDeltaComponent ?d2 . ?d2 pm:onPrimeAxis ?axis ; pm:deltaValue ?v2 .
+          FILTER NOT EXISTS {
+            ?mc pm:hasDeltaComponent ?dc . ?dc pm:onPrimeAxis ?axis ; pm:deltaValue ?vc .
+            FILTER (?vc = (?v1 + ?v2))
+          }
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-20: Composite must not contain a delta axis absent from both component memories."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:composesFirst ?m1 ; pm:composesSecond ?m2 ; pm:compositeMemory ?mc .
+          ?mc pm:hasDeltaComponent ?dc . ?dc pm:onPrimeAxis ?axis .
+          FILTER NOT EXISTS { ?m1 pm:hasDeltaComponent ?d1 . ?d1 pm:onPrimeAxis ?axis . }
+          FILTER NOT EXISTS { ?m2 pm:hasDeltaComponent ?d2 . ?d2 pm:onPrimeAxis ?axis . }
+        }
+      """
+    ] .
+
+# Inverse exponentiation constraint: delta = positive exponent - negative exponent.
+pm:InverseExponentiationCheckShape a sh:NodeShape ;
+    sh:targetClass pm:InverseExponentiationCheck ;
+    sh:property [ sh:path pm:validatesDeltaComponent ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:SignedDeltaComponent ] ;
+    sh:property [ sh:path pm:onPrimeAxis ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path pm:positiveExponent ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+    sh:property [ sh:path pm:negativeExponent ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+    sh:sparql [
+      sh:message "PTM-24: Inverse exponentiation must recover deltaValue = positiveExponent - negativeExponent on the same prime axis."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this WHERE {
+          $this pm:validatesDeltaComponent ?d ; pm:onPrimeAxis ?axis ;
+                pm:positiveExponent ?ep ; pm:negativeExponent ?en .
+          ?d pm:onPrimeAxis ?dAxis ; pm:deltaValue ?dv .
+          FILTER (?axis != ?dAxis || ?dv != (?ep - ?en))
+        }
+      """
+    ] .
+
+
+# Whole-vector realization/inverse-realization round-trip constraints.
+pm:VectorRoundTripCheckShape a sh:NodeShape ;
+    sh:targetClass pm:VectorRoundTripCheck ;
+    sh:property [ sh:path pm:validatesMemory ; sh:minCount 1 ; sh:maxCount 1 ; sh:class pm:PairwiseMemory ] ;
+    sh:property [ sh:path pm:hasInverseExponentiationCheck ; sh:minCount 1 ; sh:class pm:InverseExponentiationCheck ] ;
+    sh:sparql [
+      sh:message "PTM-29: Every delta component in the memory must have exactly one inverse-exponentiation check in the vector round trip."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this ?d WHERE {
+          $this pm:validatesMemory ?m .
+          ?m pm:hasDeltaComponent ?d .
+          FILTER NOT EXISTS {
+            $this pm:hasInverseExponentiationCheck ?check .
+            ?check pm:validatesDeltaComponent ?d .
+          }
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-29: A vector round trip must not contain an inverse-exponentiation check for an axis absent from the memory delta vector."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this ?axis WHERE {
+          $this pm:validatesMemory ?m ; pm:hasInverseExponentiationCheck ?check .
+          ?check pm:onPrimeAxis ?axis .
+          FILTER NOT EXISTS { ?m pm:hasDeltaComponent ?d . ?d pm:onPrimeAxis ?axis . }
+        }
+      """
+    ] ;
+    sh:sparql [
+      sh:message "PTM-29: Duplicate inverse-exponentiation checks for the same axis are not permitted in a whole-vector round trip."@en ;
+      sh:select """
+        PREFIX pm: <https://pairwise-memory.dev/ontology/1.0/>
+        SELECT $this ?axis WHERE {
+          $this pm:hasInverseExponentiationCheck ?a, ?b .
+          ?a pm:onPrimeAxis ?axis . ?b pm:onPrimeAxis ?axis .
+          FILTER (?a != ?b)
+        }
+      """
+    ] .
