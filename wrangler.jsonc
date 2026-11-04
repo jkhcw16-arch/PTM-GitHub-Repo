@@ -1,0 +1,22 @@
+{
+  "name": "ptm-github-repo",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-02",
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "CONTACT_DB",
+      "database_name": "ptm-contact",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "vars": {
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFyoHcs4Lzw70eyO"
+  }
+}

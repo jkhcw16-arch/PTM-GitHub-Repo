@@ -1,0 +1,131 @@
+@prefix pm:   <https://pairwise-memory.dev/ontology/1.0/> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix time: <http://www.w3.org/2006/time#> .
+
+# PTM 1.3.0 candidate additive vocabulary.
+# This file is designed to be merged with, or imported by, the PTM 1.2.3 ontology.
+
+pm:PairwiseMemory a owl:Class ;
+    rdfs:subClassOf pm:Transition ;
+    rdfs:label "Pairwise memory"@en ;
+    rdfs:comment "A transition record relating one source semantic-temporal state to one target semantic-temporal state."@en .
+
+pm:AxisCoordinate a owl:Class ;
+    rdfs:label "Axis coordinate"@en ;
+    rdfs:comment "A schema-relative semantic-axis coordinate carrying an exact integer exponent value."@en .
+
+pm:SignedDeltaComponent a owl:Class ;
+    rdfs:label "Signed delta component"@en ;
+    rdfs:comment "The signed exponent difference for one semantic axis of a pairwise memory."@en .
+
+pm:FormalPrimeRealization a owl:Class ;
+    rdfs:label "Formal prime realization"@en ;
+    rdfs:comment "A formal prime-exponent realization. Materialization as a single composite integer is not required."@en .
+
+pm:HistoricalRole a owl:Class ; rdfs:subClassOf pm:Role ; rdfs:label "Historical role"@en .
+pm:ProjectiveRole a owl:Class ; rdfs:subClassOf pm:Role ; rdfs:label "Projective role"@en .
+pm:HistoricalRole owl:disjointWith pm:ProjectiveRole .
+
+pm:hasTargetState a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:Transition ; rdfs:range pm:State ;
+    rdfs:label "has target state"@en .
+
+pm:hasAxisCoordinate a owl:ObjectProperty ;
+    rdfs:domain pm:State ; rdfs:range pm:AxisCoordinate ;
+    rdfs:label "has axis coordinate"@en .
+
+pm:hasDeltaComponent a owl:ObjectProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:SignedDeltaComponent ;
+    rdfs:label "has delta component"@en .
+
+pm:onPrimeAxis a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:label "on prime axis"@en ;
+    rdfs:comment "Associates a coordinate or signed delta component with exactly one configured prime-axis resource."@en .
+
+pm:exponentValue a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:AxisCoordinate ; rdfs:range xsd:integer ;
+    rdfs:label "exponent value"@en .
+
+pm:deltaValue a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:SignedDeltaComponent ; rdfs:range xsd:integer ;
+    rdfs:label "delta value"@en .
+
+pm:schemaVersion a owl:DatatypeProperty ;
+    rdfs:range xsd:string ; rdfs:label "schema version"@en ;
+    rdfs:comment "Schema-version identifier. Cardinality is enforced on PTM state and pair records by SHACL rather than globally by OWL."@en .
+
+pm:hasSourceTime a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:TimePoint ;
+    rdfs:label "has source time"@en .
+
+pm:hasTargetTime a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:TimePoint ;
+    rdfs:label "has target time"@en .
+
+pm:nextMemory a owl:ObjectProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:PairwiseMemory ;
+    rdfs:label "next memory"@en ;
+    rdfs:comment "Relates a pairwise memory to an explicitly asserted successor pair whose source boundary is intended to equal this pair's target boundary."@en .
+
+pm:hasPrimeRealization a owl:ObjectProperty ;
+    rdfs:range pm:FormalPrimeRealization ; rdfs:label "has prime realization"@en .
+
+pm:roleNaturalNumber a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:Role ; rdfs:range xsd:positiveInteger ; rdfs:label "role natural number"@en .
+
+pm:positivePrimeFactorization a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:FormalPrimeRealization ; rdfs:range xsd:string ;
+    rdfs:label "positive prime factorization"@en ;
+    rdfs:comment "Canonical or implementation-defined serialization of nonnegative prime exponents; avoids requiring a materialized composite integer."@en .
+
+pm:negativePrimeFactorization a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:FormalPrimeRealization ; rdfs:range xsd:string ;
+    rdfs:label "negative prime factorization"@en ;
+    rdfs:comment "Canonical or implementation-defined serialization of absolute negative prime exponents for a signed realization."@en .
+
+# Algebraic composition vocabulary
+pm:composesFirst a owl:ObjectProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:PairwiseMemory ;
+    rdfs:label "composes first"@en .
+
+pm:composesSecond a owl:ObjectProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:PairwiseMemory ;
+    rdfs:label "composes second"@en .
+
+pm:compositeMemory a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:PairwiseMemory ; rdfs:range pm:PairwiseMemory ;
+    rdfs:label "composite memory"@en .
+
+# Inverse exponentiation validation vocabulary
+pm:InverseExponentiationCheck a owl:Class ;
+    rdfs:label "Inverse exponentiation check"@en ;
+    rdfs:comment "A validation record comparing a signed delta component with the exponent recovered from positive and negative formal prime-factor exponents."@en .
+
+pm:validatesDeltaComponent a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:InverseExponentiationCheck ; rdfs:range pm:SignedDeltaComponent ;
+    rdfs:label "validates delta component"@en .
+
+pm:positiveExponent a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:InverseExponentiationCheck ; rdfs:range xsd:integer ;
+    rdfs:label "positive exponent"@en .
+
+pm:negativeExponent a owl:DatatypeProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:InverseExponentiationCheck ; rdfs:range xsd:integer ;
+    rdfs:label "negative exponent"@en .
+
+
+# Whole-vector prime realization round-trip validation vocabulary
+pm:VectorRoundTripCheck a owl:Class ;
+    rdfs:label "Vector round-trip check"@en ;
+    rdfs:comment "Validation record asserting that inverse exponentiation of all prime-axis realization components recovers the complete signed delta vector of a pairwise memory."@en .
+
+pm:validatesMemory a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:domain pm:VectorRoundTripCheck ; rdfs:range pm:PairwiseMemory ;
+    rdfs:label "validates memory"@en .
+
+pm:hasInverseExponentiationCheck a owl:ObjectProperty ;
+    rdfs:domain pm:VectorRoundTripCheck ; rdfs:range pm:InverseExponentiationCheck ;
+    rdfs:label "has inverse exponentiation check"@en .

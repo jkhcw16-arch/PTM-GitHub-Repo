@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import worker from "../src/index.js";
+globalThis.fetch=async()=>Response.json({success:true});
+let captured;
+const env={TURNSTILE_SECRET_KEY:"test-secret",ASSETS:{fetch:async()=>new Response("site")},CONTACT_DB:{prepare:(sql)=>({bind:(...args)=>({run:async()=>{captured={sql,args};return {success:true}}})})}};
+let r=await worker.fetch(new Request("https://x/api/contact",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"Test User",organization:"Example",email:"test@example.com",message:"Licensing inquiry",turnstileToken:"test-token"})}),env);
+assert.equal(r.status,202); const j=await r.json(); assert.equal(j.accepted,true); assert.ok(j.reference); assert.equal(captured.args[2],"Test User"); assert.equal(captured.args[4],"test@example.com");
+r=await worker.fetch(new Request("https://x/api/contact",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:"X",email:"bad",message:"Hi",turnstileToken:"test-token"})}),env); assert.equal(r.status,400);
+r=await worker.fetch(new Request("https://x/api/contact"),env); assert.equal(r.status,405);
+console.log("PTM contact Worker tests: PASS");
