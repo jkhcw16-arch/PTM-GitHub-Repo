@@ -1,22 +1,9 @@
-# Pairwise Temporal Memory (PTM) - 1.3.0 Candidate
+# PTM GitHub Pages deployment workflow
 
-Candidate repository bundle for PTM ontology additions, SHACL validation, algebraic round-trip testing, CI, security policy, and the static workflow-marketing site.
+Copy `.github/workflows/deploy-pages.yml` into the PTM repository.
 
-## Layout
-- `ontology/` - OWL/RDF Turtle additions and SHACL shapes
-- `tests/` - Python algebra and SHACL regression tests
-- `.github/workflows/ptm-ci.yml` - CI workflow
-- `site/` - static Cloudflare Pages site
-- `SECURITY.md` - vulnerability reporting and severity policy
-- `CONTRIBUTING.md` - contributor policy
-- `LICENSE` - proprietary all-rights-reserved notice
+The workflow publishes only `site/` to GitHub Pages. It intentionally does not publish the repository root, Worker source, D1 configuration, authorization policy, OAuth fixtures, tests, or other project artifacts.
 
-## Test commands
-From the repository root:
+In the repository's GitHub Pages settings, set the publishing source to **GitHub Actions**.
 
-    python -m pip install -r requirements-test.txt
-    python tests/test_ptm_roundtrip.py
-    python tests/test_ptm_shacl.py
-
-## License
-Copyright (c) 2026 Jamie Kinney. All rights reserved. This repository is not distributed under an open-source license. See `LICENSE`.
+Important: GitHub Pages is the static frontend only. PTM server-side routes such as `/api/contact`, D1 access, Turnstile Siteverify, and future `/api/v1/*` Worker APIs must remain hosted by the server-side backend. If the static Pages frontend calls that backend from another origin, configure the backend URL and cross-origin policy deliberately.
