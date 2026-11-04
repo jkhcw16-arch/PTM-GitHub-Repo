@@ -1,0 +1,99 @@
+name: PTM CI and Pages Deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ptm-ci-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate required PTM files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/index.js
+          test -f wrangler.jsonc
+          test -f release-manifest.json
+          test -f schema.sql
+          test -f site/index.html
+
+      - name: Validate Worker JavaScript syntax
+        run: node --check src/index.js
+
+      - name: Validate Worker routes and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '"/api/contact"' src/index.js
+          grep -Fq 'CONTACT_DB' src/index.js
+          grep -Fq 'TURNSTILE_SECRET_KEY' src/index.js
+          grep -Fq 'env.ASSETS' src/index.js
+
+      - name: Validate site HTML and contact contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Eiq '<!doctype[[:space:]]+html' site/index.html
+          grep -Eiq '<html([[:space:]>])' site/index.html
+          grep -Eiq '<style([[:space:]>])' site/index.html
+          grep -Eiq '<form[^>]+id=["'"']contact-form["'"']' site/index.html
+          grep -Fq 'Discuss integration and licensing' site/index.html
+          grep -Fq 'cf-turnstile' site/index.html
+          grep -Fq 'turnstileToken' site/index.html
+          grep -Fq '/api/contact' site/index.html
+          if grep -Fq 'result.id' site/index.html; then
+            echo 'ERROR: frontend uses result.id but /api/contact returns reference.'
+            exit 1
+          fi
+          grep -Fq 'result.reference' site/index.html
+
+      - name: Validate site UTF-8
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          Path('site/index.html').read_text(encoding='utf-8', errors='strict')
+          print('UTF-8 validation: PASS')
+          PY
+
+  pages-build:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload PTM site artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./site
+
+  pages-deploy:
+    if: github.event_name != 'pull_request'
+    needs: pages-build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy PTM site to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
