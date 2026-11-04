@@ -25,6 +25,10 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+Cloudflare Worker:
+wrangler.jsonc
+→ src/index.js
+→ wrangler deploy
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
@@ -35,6 +39,10 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+GitHub Pages:
+site/index.html
+→ upload-pages-artifact
+→ deploy-pages
 
     runs-on: ubuntu-latest
     needs: build
