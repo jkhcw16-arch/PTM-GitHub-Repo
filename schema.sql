@@ -1,11 +1,3 @@
-CREATE TABLE IF NOT EXISTS contact_inquiries (
-  id TEXT PRIMARY KEY,
-  created_at TEXT NOT NULL,
-  name TEXT NOT NULL,
-  organization TEXT NOT NULL DEFAULT '',
-  email TEXT NOT NULL,
-  use_case TEXT NOT NULL DEFAULT '',
-  integration_interest TEXT NOT NULL DEFAULT '',
-  message TEXT NOT NULL
-) STRICT;
-CREATE INDEX IF NOT EXISTS idx_contact_inquiries_created_at ON contact_inquiries(created_at);
+CREATE TABLE IF NOT EXISTS ptm_states(tenant_id text NOT NULL,state_id text NOT NULL,registry_id text NOT NULL,registry_version text NOT NULL,temporal_position timestamptz NOT NULL,vector jsonb NOT NULL,provenance_refs jsonb NOT NULL DEFAULT '[]'::jsonb,created_at timestamptz NOT NULL,version bigint NOT NULL DEFAULT 1,PRIMARY KEY(tenant_id,state_id));
+CREATE TABLE IF NOT EXISTS ptm_transitions(tenant_id text NOT NULL,transition_id text NOT NULL,source_state_id text NOT NULL,target_state_id text NOT NULL,registry_id text NOT NULL,registry_version text NOT NULL,delta jsonb NOT NULL,created_at timestamptz NOT NULL,PRIMARY KEY(tenant_id,transition_id));
+CREATE TABLE IF NOT EXISTS ptm_evidence(tenant_id text NOT NULL,evidence_id text NOT NULL,resource_type text NOT NULL,resource_id text NOT NULL,evidence_type text NOT NULL,payload jsonb NOT NULL,created_at timestamptz NOT NULL,PRIMARY KEY(tenant_id,evidence_id));
