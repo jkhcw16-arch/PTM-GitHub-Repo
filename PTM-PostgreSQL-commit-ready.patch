@@ -1,0 +1,309 @@
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/.github/workflows/postgres-integration.yml b/.github/workflows/postgres-integration.yml
+--- a/.github/workflows/postgres-integration.yml	1970-01-01 00:00:00.000000000 +0000
++++ b/.github/workflows/postgres-integration.yml	2026-11-06 11:39:19.006467029 +0000
+@@ -0,0 +1,57 @@
++name: PTM PostgreSQL Integration
++on:
++  push:
++    branches: [main]
++    paths:
++      - 'adapters/postgres/**'
++      - 'packages/core/**'
++      - 'packages/persistence/**'
++      - 'tests/integration/**'
++      - 'package*.json'
++      - '.github/workflows/postgres-integration.yml'
++  pull_request:
++    branches: [main]
++    paths:
++      - 'adapters/postgres/**'
++      - 'packages/core/**'
++      - 'packages/persistence/**'
++      - 'tests/integration/**'
++      - 'package*.json'
++      - '.github/workflows/postgres-integration.yml'
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  postgres-live:
++    runs-on: ubuntu-latest
++    services:
++      postgres:
++        image: postgres:17-alpine
++        env:
++          POSTGRES_DB: ptm_test
++          POSTGRES_USER: ptm_test
++          POSTGRES_PASSWORD: ptm_test
++        ports:
++          - 5432:5432
++        options: >-
++          --health-cmd "pg_isready -U ptm_test -d ptm_test"
++          --health-interval 5s
++          --health-timeout 5s
++          --health-retries 10
++    env:
++      DATABASE_URL: postgresql://ptm_test:ptm_test@127.0.0.1:5432/ptm_test
++    steps:
++      - uses: actions/checkout@v6
++      - uses: actions/setup-node@v6
++        with:
++          node-version: '24'
++          cache: npm
++      - run: npm ci
++      - name: TypeScript compile
++        run: npm run build
++      - name: Apply PostgreSQL schema
++        run: npm run db:migrate
++      - name: Run repository unit tests
++        run: npm test
++      - name: Run live PostgreSQL integration tests
++        run: npm run test:postgres
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/README.md b/adapters/postgres/README.md
+--- a/adapters/postgres/README.md	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/README.md	2026-11-06 11:39:20.030467453 +0000
+@@ -0,0 +1,41 @@
++# PostgreSQL adapter
++
++## Install
++
++```bash
++npm install
++```
++
++## Configure
++
++```bash
++export DATABASE_URL='postgresql://user:password@host:5432/ptm'
++```
++
++## Migrate
++
++```bash
++npm run db:migrate
++```
++
++## Behavior
++
++- All user values use PostgreSQL parameters.
++- Tenant ID is included in every primary lookup.
++- Multi-step operations use one checked-out client with `BEGIN`, `COMMIT`, and `ROLLBACK`.
++- State updates use optimistic concurrency through `expectedVersion`.
++- Vectors are canonicalized before persistence and after retrieval.
++- Repository code does not accept dynamic table or column identifiers.
++
++## Live integration tests
++
++The live suite requires a real PostgreSQL server through `DATABASE_URL`:
++
++```bash
++npm run db:migrate
++npm run test:postgres
++```
++
++GitHub Actions runs the suite against a `postgres:17-alpine` service container. The workflow waits for PostgreSQL health before executing migrations and tests.
++
++The live suite verifies schema creation, canonical state round trips, tenant isolation, optimistic concurrency, signed arbitrary-precision deltas, transition lookup, atomic commit, and transaction rollback.
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/codec.ts b/adapters/postgres/codec.ts
+--- a/adapters/postgres/codec.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/codec.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,17 @@
++import type { State, Transition, SparseVector } from '../../packages/core/model.js';
++import { canonicalize } from '../../packages/core/vector.js';
++import type { AxisRegistry } from '../../packages/core/model.js';
++
++export type StateRow={tenant_id:string;state_id:string;registry_id:string;registry_version:string;temporal_position:Date|string;vector:unknown;provenance_refs:unknown;created_at:Date|string;version:string|number|bigint};
++export type TransitionRow={tenant_id:string;transition_id:string;source_state_id:string;target_state_id:string;registry_id:string;registry_version:string;delta:unknown;created_at:Date|string};
++
++function iso(value:Date|string):string { const d=value instanceof Date?value:new Date(value); if(Number.isNaN(d.valueOf())) throw new Error('INVALID_TIMESTAMP'); return d.toISOString(); }
++function vector(value:unknown):SparseVector { if(!Array.isArray(value)) throw new Error('INVALID_VECTOR_STORAGE'); return value.map((x:any)=>({axis:String(x.axis),value:String(x.value)})); }
++function refs(value:unknown):readonly string[] { if(!Array.isArray(value)) throw new Error('INVALID_PROVENANCE_STORAGE'); return value.map(String); }
++
++export function stateFromRow(row:StateRow, registry:AxisRegistry):State {
++  return {id:row.state_id,tenantId:row.tenant_id,registryId:row.registry_id,registryVersion:row.registry_version,temporalPosition:iso(row.temporal_position),vector:canonicalize(vector(row.vector),registry),provenanceRefs:refs(row.provenance_refs),createdAt:iso(row.created_at)};
++}
++export function transitionFromRow(row:TransitionRow, registry:AxisRegistry):Transition {
++  return {id:row.transition_id,tenantId:row.tenant_id,registryId:row.registry_id,registryVersion:row.registry_version,sourceStateId:row.source_state_id,targetStateId:row.target_state_id,delta:canonicalize(vector(row.delta),registry),createdAt:iso(row.created_at)};
++}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/migrate.ts b/adapters/postgres/migrate.ts
+--- a/adapters/postgres/migrate.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/migrate.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,5 @@
++import { Pool } from 'pg';
++import { readFile } from 'node:fs/promises';
++const url=process.env.DATABASE_URL;if(!url)throw new Error('DATABASE_URL_REQUIRED');
++const sql=await readFile(new URL('./schema.sql',import.meta.url),'utf8');const pool=new Pool({connectionString:url});
++try{await pool.query(sql);console.log('PTM PostgreSQL schema applied');}finally{await pool.end();}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/registry.ts b/adapters/postgres/registry.ts
+--- a/adapters/postgres/registry.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/registry.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,7 @@
++import type { AxisRegistry } from '../../packages/core/model.js';
++export interface RegistryResolver { get(id:string,version:string):Promise<AxisRegistry>; }
++export class StaticRegistryResolver implements RegistryResolver {
++  private readonly items=new Map<string,AxisRegistry>();
++  constructor(registries:readonly AxisRegistry[]){for(const r of registries)this.items.set(`${r.id}@${r.version}`,r)}
++  async get(id:string,version:string):Promise<AxisRegistry>{const r=this.items.get(`${id}@${version}`);if(!r)throw new Error('REGISTRY_NOT_FOUND');return r;}
++}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/repositories.ts b/adapters/postgres/repositories.ts
+--- a/adapters/postgres/repositories.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/repositories.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,33 @@
++import type { State, Transition } from '../../packages/core/model.js';
++import { canonicalize } from '../../packages/core/vector.js';
++import type { EvidenceRecord, Queryable, StateRepository, TransitionRepository, EvidenceRepository } from '../../packages/persistence/ports.js';
++import type { RegistryResolver } from './registry.js';
++import { stateFromRow, transitionFromRow, type StateRow, type TransitionRow } from './codec.js';
++
++export class PostgresStateRepository implements StateRepository {
++  constructor(private readonly db:Queryable,private readonly registries:RegistryResolver){}
++  async get(tenantId:string,id:string):Promise<State|null>{
++    const q=await this.db.query<StateRow>('SELECT * FROM ptm_states WHERE tenant_id=$1 AND state_id=$2',[tenantId,id]);
++    if(!q.rows[0])return null; const r=q.rows[0]; return stateFromRow(r,await this.registries.get(r.registry_id,r.registry_version));
++  }
++  async put(state:State,expectedVersion:bigint=0n):Promise<bigint>{
++    const registry=await this.registries.get(state.registryId,state.registryVersion); const v=canonicalize(state.vector,registry);
++    const q=await this.db.query<{version:string}>(`INSERT INTO ptm_states(tenant_id,state_id,registry_id,registry_version,temporal_position,vector,provenance_refs,created_at,version)
++      VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,1)
++      ON CONFLICT(tenant_id,state_id) DO UPDATE SET registry_id=EXCLUDED.registry_id,registry_version=EXCLUDED.registry_version,temporal_position=EXCLUDED.temporal_position,vector=EXCLUDED.vector,provenance_refs=EXCLUDED.provenance_refs,version=ptm_states.version+1
++      WHERE ptm_states.version=$9 RETURNING version`,[state.tenantId,state.id,state.registryId,state.registryVersion,state.temporalPosition,JSON.stringify(v),JSON.stringify(state.provenanceRefs),state.createdAt,expectedVersion.toString()]);
++    if(!q.rows[0])throw new Error('CONCURRENCY_CONFLICT'); return BigInt(q.rows[0].version);
++  }
++}
++
++export class PostgresTransitionRepository implements TransitionRepository {
++  constructor(private readonly db:Queryable,private readonly registries:RegistryResolver){}
++  async get(tenantId:string,id:string):Promise<Transition|null>{const q=await this.db.query<TransitionRow>('SELECT * FROM ptm_transitions WHERE tenant_id=$1 AND transition_id=$2',[tenantId,id]);if(!q.rows[0])return null;const r=q.rows[0];return transitionFromRow(r,await this.registries.get(r.registry_id,r.registry_version));}
++  async put(t:Transition):Promise<void>{const registry=await this.registries.get(t.registryId,t.registryVersion);const delta=canonicalize(t.delta,registry);await this.db.query(`INSERT INTO ptm_transitions(tenant_id,transition_id,source_state_id,target_state_id,registry_id,registry_version,delta,created_at) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,[t.tenantId,t.id,t.sourceStateId,t.targetStateId,t.registryId,t.registryVersion,JSON.stringify(delta),t.createdAt]);}
++  async listByState(tenantId:string,stateId:string,limit=100):Promise<Transition[]>{const n=Math.max(1,Math.min(500,Math.trunc(limit)));const q=await this.db.query<TransitionRow>('SELECT * FROM ptm_transitions WHERE tenant_id=$1 AND (source_state_id=$2 OR target_state_id=$2) ORDER BY created_at,transition_id LIMIT $3',[tenantId,stateId,n]);return Promise.all(q.rows.map(async r=>transitionFromRow(r,await this.registries.get(r.registry_id,r.registry_version))));}
++}
++
++export class PostgresEvidenceRepository implements EvidenceRepository {
++  constructor(private readonly db:Queryable){}
++  async append(r:EvidenceRecord):Promise<void>{await this.db.query('INSERT INTO ptm_evidence(tenant_id,evidence_id,resource_type,resource_id,evidence_type,payload,created_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)',[r.tenantId,r.evidenceId,r.resourceType,r.resourceId,r.evidenceType,JSON.stringify(r.payload),r.createdAt]);}
++}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/adapters/postgres/unit-of-work.ts b/adapters/postgres/unit-of-work.ts
+--- a/adapters/postgres/unit-of-work.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/adapters/postgres/unit-of-work.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,18 @@
++import { Pool, type PoolClient, type PoolConfig } from 'pg';
++import type { TransactionContext, UnitOfWork } from '../../packages/persistence/ports.js';
++import type { RegistryResolver } from './registry.js';
++import { PostgresEvidenceRepository, PostgresStateRepository, PostgresTransitionRepository } from './repositories.js';
++
++export class PostgresUnitOfWork implements UnitOfWork {
++  private readonly pool:Pool;
++  constructor(private readonly registries:RegistryResolver,config:PoolConfig={connectionString:process.env.DATABASE_URL}){this.pool=new Pool(config);}
++  async transaction<T>(task:(context:TransactionContext)=>Promise<T>):Promise<T>{
++    const client:PoolClient=await this.pool.connect();
++    try{
++      await client.query('BEGIN');
++      const context={queryable:client,states:new PostgresStateRepository(client,this.registries),transitions:new PostgresTransitionRepository(client,this.registries),evidence:new PostgresEvidenceRepository(client)};
++      const result=await task(context); await client.query('COMMIT'); return result;
++    }catch(error){try{await client.query('ROLLBACK')}catch{}throw error;}finally{client.release();}
++  }
++  async close():Promise<void>{await this.pool.end();}
++}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/package.json b/package.json
+--- a/package.json	2026-11-06 08:03:33.000000000 +0000
++++ b/package.json	2026-11-06 11:39:19.926467410 +0000
+@@ -1 +1,22 @@
+-{"name":"ptm-portable-runtime","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"test":"node --test","build":"tsc -b"},"dependencies":{},"devDependencies":{"typescript":"^5.9.0"}}
++{
++  "name": "ptm-portable-runtime",
++  "private": true,
++  "type": "module",
++  "engines": {
++    "node": ">=24"
++  },
++  "scripts": {
++    "build": "tsc --noEmit",
++    "test": "node --import tsx --test tests/*.test.ts",
++    "db:migrate": "node --import tsx adapters/postgres/migrate.ts",
++    "test:postgres": "node --import tsx --test tests/integration/*.live.test.ts"
++  },
++  "dependencies": {
++    "pg": "^8.16.3"
++  },
++  "devDependencies": {
++    "typescript": "^5.9.3",
++    "tsx": "^4.20.6",
++    "@types/pg": "^8.15.5"
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/packages/persistence/ports.ts b/packages/persistence/ports.ts
+--- a/packages/persistence/ports.ts	2026-11-06 08:03:32.000000000 +0000
++++ b/packages/persistence/ports.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -1,5 +1,10 @@
+ import type { State, Transition } from '../core/model.js';
+-export interface StateRepository { get(tenantId:string,id:string):Promise<State|null>; put(state:State):Promise<void>; }
+-export interface TransitionRepository { get(tenantId:string,id:string):Promise<Transition|null>; put(t:Transition):Promise<void>; }
+-export interface EvidenceRepository { append(record:unknown):Promise<void>; }
+-export interface UnitOfWork { transaction<T>(task:()=>Promise<T>):Promise<T>; }
++
++export interface QueryResult<Row = Record<string, unknown>> { rows: Row[]; rowCount: number | null; }
++export interface Queryable { query<Row = Record<string, unknown>>(text: string, values?: readonly unknown[]): Promise<QueryResult<Row>>; }
++export interface StateRepository { get(tenantId:string,id:string):Promise<State|null>; put(state:State, expectedVersion?:bigint):Promise<bigint>; }
++export interface TransitionRepository { get(tenantId:string,id:string):Promise<Transition|null>; put(t:Transition):Promise<void>; listByState(tenantId:string,stateId:string,limit?:number):Promise<Transition[]>; }
++export interface EvidenceRepository { append(record:EvidenceRecord):Promise<void>; }
++export interface EvidenceRecord {tenantId:string;evidenceId:string;resourceType:string;resourceId:string;evidenceType:string;payload:unknown;createdAt:string;}
++export interface TransactionContext { states:StateRepository; transitions:TransitionRepository; evidence:EvidenceRepository; queryable:Queryable; }
++export interface UnitOfWork { transaction<T>(task:(context:TransactionContext)=>Promise<T>):Promise<T>; close():Promise<void>; }
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/tests/integration/postgres.live.test.ts b/tests/integration/postgres.live.test.ts
+--- a/tests/integration/postgres.live.test.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/integration/postgres.live.test.ts	2026-11-06 11:39:18.911466990 +0000
+@@ -0,0 +1,38 @@
++import test,{before,after,beforeEach} from 'node:test';
++import assert from 'node:assert/strict';
++import {Pool} from 'pg';
++import {readFile} from 'node:fs/promises';
++import {PostgresUnitOfWork} from '../../adapters/postgres/unit-of-work.js';
++import {StaticRegistryResolver} from '../../adapters/postgres/registry.js';
++
++const DATABASE_URL=process.env.DATABASE_URL;
++if(!DATABASE_URL) throw new Error('DATABASE_URL_REQUIRED_FOR_LIVE_TESTS');
++const pool=new Pool({connectionString:DATABASE_URL});
++const registry={id:'schema:test',version:'1',axes:[{id:'a',position:0,prime:'2'},{id:'b',position:1,prime:'3'},{id:'c',position:2,prime:'5'}]};
++const registries=new StaticRegistryResolver([registry]);
++let uow:PostgresUnitOfWork;
++const now='2026-01-01T00:00:00.000Z';
++function state(id:string,tenant='tenant:a',vector:any=[{axis:'a',value:'1'}]){return{id,tenantId:tenant,registryId:registry.id,registryVersion:registry.version,temporalPosition:now,vector,provenanceRefs:['prov:1'],createdAt:now};}
++
++before(async()=>{const sql=await readFile(new URL('../../adapters/postgres/schema.sql',import.meta.url),'utf8');await pool.query(sql);uow=new PostgresUnitOfWork(registries,{connectionString:DATABASE_URL,max:4});});
++beforeEach(async()=>{await pool.query('TRUNCATE ptm_evidence,ptm_transitions,ptm_states');});
++after(async()=>{await uow.close();await pool.end();});
++
++test('migration created repository tables',async()=>{const r=await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'ptm_%' ORDER BY tablename");assert.deepEqual(r.rows.map(x=>x.tablename),['ptm_evidence','ptm_states','ptm_transitions']);});
++
++test('state round trip is canonical and tenant isolated',async()=>{await uow.transaction(async tx=>{await tx.states.put(state('s1','tenant:a',[{axis:'c',value:'3'},{axis:'a',value:'1'}]));});
++ const a=await uow.transaction(tx=>tx.states.get('tenant:a','s1'));assert.deepEqual(a?.vector,[{axis:'a',value:'1'},{axis:'c',value:'3'}]);
++ const b=await uow.transaction(tx=>tx.states.get('tenant:b','s1'));assert.equal(b,null);
++});
++
++test('optimistic concurrency rejects stale write',async()=>{const v1=await uow.transaction(tx=>tx.states.put(state('s1'),0n));assert.equal(v1,1n);const v2=await uow.transaction(tx=>tx.states.put({...state('s1'),vector:[{axis:'a',value:'2'}]},1n));assert.equal(v2,2n);await assert.rejects(()=>uow.transaction(tx=>tx.states.put({...state('s1'),vector:[{axis:'a',value:'3'}]},1n)),/CONCURRENCY_CONFLICT/);});
++
++test('transition persists signed arbitrary precision delta',async()=>{const huge='92233720368547758081234567890';await uow.transaction(async tx=>{await tx.states.put(state('s1'));await tx.states.put(state('s2'));await tx.transitions.put({id:'tr1',tenantId:'tenant:a',registryId:registry.id,registryVersion:registry.version,sourceStateId:'s1',targetStateId:'s2',delta:[{axis:'b',value:'-4'},{axis:'c',value:huge}],createdAt:now});});const t=await uow.transaction(tx=>tx.transitions.get('tenant:a','tr1'));assert.deepEqual(t?.delta,[{axis:'b',value:'-4'},{axis:'c',value:huge}]);});
++
++test('transition lookup by state is tenant qualified and bounded',async()=>{await uow.transaction(async tx=>{await tx.transitions.put({id:'tr1',tenantId:'tenant:a',registryId:registry.id,registryVersion:registry.version,sourceStateId:'s1',targetStateId:'s2',delta:[{axis:'a',value:'1'}],createdAt:now});await tx.transitions.put({id:'tr2',tenantId:'tenant:b',registryId:registry.id,registryVersion:registry.version,sourceStateId:'s1',targetStateId:'s3',delta:[{axis:'a',value:'2'}],createdAt:now});});const rows=await uow.transaction(tx=>tx.transitions.listByState('tenant:a','s1',10));assert.deepEqual(rows.map(x=>x.id),['tr1']);});
++
++test('mutation and evidence commit atomically',async()=>{await uow.transaction(async tx=>{await tx.states.put(state('s1'));await tx.evidence.append({tenantId:'tenant:a',evidenceId:'ev1',resourceType:'state',resourceId:'s1',evidenceType:'created',payload:{source:'integration-test'},createdAt:now});});const counts=await pool.query('SELECT (SELECT count(*)::int FROM ptm_states) states,(SELECT count(*)::int FROM ptm_evidence) evidence');assert.deepEqual(counts.rows[0],{states:1,evidence:1});});
++
++test('failed transaction rolls back state and evidence',async()=>{await assert.rejects(()=>uow.transaction(async tx=>{await tx.states.put(state('s1'));await tx.evidence.append({tenantId:'tenant:a',evidenceId:'ev1',resourceType:'state',resourceId:'s1',evidenceType:'created',payload:{ok:true},createdAt:now});throw new Error('FORCED_FAILURE');}),/FORCED_FAILURE/);const counts=await pool.query('SELECT (SELECT count(*)::int FROM ptm_states) states,(SELECT count(*)::int FROM ptm_evidence) evidence');assert.deepEqual(counts.rows[0],{states:0,evidence:0});});
++
++test('database enforces primary-key uniqueness',async()=>{await uow.transaction(tx=>tx.states.put(state('s1')));await assert.rejects(()=>uow.transaction(tx=>tx.states.put(state('s1'),99n)),/CONCURRENCY_CONFLICT/);});
+diff -ruN '--exclude=node_modules' '--exclude=package-lock.json' a/tests/postgres-adapter.test.ts b/tests/postgres-adapter.test.ts
+--- a/tests/postgres-adapter.test.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/tests/postgres-adapter.test.ts	2026-11-06 11:29:31.000000000 +0000
+@@ -0,0 +1,12 @@
++import test from 'node:test';import assert from 'node:assert/strict';
++import { PostgresStateRepository,PostgresTransitionRepository,PostgresEvidenceRepository } from '../adapters/postgres/repositories.js';
++import { StaticRegistryResolver } from '../adapters/postgres/registry.js';
++import type { QueryResult,Queryable } from '../packages/persistence/ports.js';
++const registry={id:'schema:test',version:'1',axes:[{id:'a',position:0,prime:'2'},{id:'b',position:1,prime:'3'}]};
++class FakeDb implements Queryable{calls:{text:string;values:readonly unknown[]}[]=[];responses:QueryResult<any>[]=[];async query<R>(text:string,values:readonly unknown[]=[]):Promise<QueryResult<R>>{this.calls.push({text,values});return (this.responses.shift()??{rows:[],rowCount:0}) as QueryResult<R>}}
++const state={id:'s1',tenantId:'t1',registryId:'schema:test',registryVersion:'1',temporalPosition:'2026-01-01T00:00:00.000Z',vector:[{axis:'b',value:'2'},{axis:'a',value:'1'}],provenanceRefs:['p1'],createdAt:'2026-01-01T00:00:00.000Z'};
++test('state put parameterizes data and canonicalizes vector',async()=>{const db=new FakeDb();db.responses.push({rows:[{version:'1'}],rowCount:1});const repo=new PostgresStateRepository(db,new StaticRegistryResolver([registry]));assert.equal(await repo.put(state,0n),1n);assert.match(db.calls[0].text,/\$1/);assert.equal(db.calls[0].values[0],'t1');assert.equal(db.calls[0].values[5],JSON.stringify([{axis:'a',value:'1'},{axis:'b',value:'2'}]));});
++test('state put detects optimistic concurrency conflict',async()=>{const db=new FakeDb();const repo=new PostgresStateRepository(db,new StaticRegistryResolver([registry]));await assert.rejects(()=>repo.put(state,5n),/CONCURRENCY_CONFLICT/);});
++test('tenant qualified lookup',async()=>{const db=new FakeDb();const repo=new PostgresStateRepository(db,new StaticRegistryResolver([registry]));await repo.get('tenant-a','same-id');assert.deepEqual(db.calls[0].values,['tenant-a','same-id']);});
++test('transition list clamps limit',async()=>{const db=new FakeDb();const repo=new PostgresTransitionRepository(db,new StaticRegistryResolver([registry]));await repo.listByState('t','s',9999);assert.equal(db.calls[0].values[2],500);});
++test('evidence uses parameterized JSON',async()=>{const db=new FakeDb();const repo=new PostgresEvidenceRepository(db);await repo.append({tenantId:'t',evidenceId:'e',resourceType:'state',resourceId:'s',evidenceType:'created',payload:{ok:true},createdAt:'2026-01-01T00:00:00Z'});assert.equal(db.calls[0].values[5],'{"ok":true}');});

@@ -1,0 +1,20 @@
+Suggested commit
+
+feat(runtime): add portable PostgreSQL persistence adapter and live integration CI
+
+Adds:
+- PostgreSQL state, transition, and evidence repositories
+- Registry-aware row codecs
+- Transactional unit of work with BEGIN/COMMIT/ROLLBACK
+- Optimistic concurrency for state updates
+- Migration runner and PostgreSQL schema
+- Repository unit tests
+- Live PostgreSQL integration tests
+- GitHub Actions PostgreSQL service-container workflow
+
+Validation completed in the build environment:
+- TypeScript compile: PASS
+- Repository unit tests: 5 passed, 0 failed
+- Live test source/workflow structure: PASS
+
+Live PostgreSQL execution itself is delegated to GitHub Actions because the local sandbox has no Docker/Podman/PostgreSQL daemon.
