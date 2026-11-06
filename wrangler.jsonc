@@ -1,20 +1,33 @@
 {
-  "OIDC_ISSUER": "https://REPLACE_IDP_ISSUER/",
-  "OIDC_AUDIENCE": "ptm-api",
-  "OIDC_JWKS_URL": "https://REPLACE_IDP_ISSUER/.well-known/jwks.json"
-}
-
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ptm-runtime",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*",
+      "/health/*"
     ]
   },
-  "d1_databases": [
-    {
-      "binding": "CONTACT_DB",
-      "database_name": "ptm-contact",
-      "database_id": "5753cbd0-88c9-48a3-8455-01c59963df9a"
-    }
-  ],
   "vars": {
-    "TURNSTILE_SITE_KEY": "0x4AAAAAAFyoHcs4Lzw70eyO"
-
-  }
+    "RELEASE": "development",
+    "OIDC_ISSUER": "https://REPLACE_IDP_ISSUER/",
+    "OIDC_AUDIENCE": "ptm-api",
+    "OIDC_JWKS_URL": "https://REPLACE_IDP_ISSUER/.well-known/jwks.json"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_HYPERDRIVE_ID",
+      "localConnectionString": "postgresql://ptm:ptm@127.0.0.1:5432/ptm"
+    }
+  ]
 }
