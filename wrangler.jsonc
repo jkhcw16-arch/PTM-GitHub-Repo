@@ -1,5 +1,4 @@
 {
- {
   "OIDC_ISSUER": "https://REPLACE_IDP_ISSUER/",
   "OIDC_AUDIENCE": "ptm-api",
   "OIDC_JWKS_URL": "https://REPLACE_IDP_ISSUER/.well-known/jwks.json"
